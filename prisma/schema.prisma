@@ -1,0 +1,268 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum Role {
+  CITIZEN
+  COMMUNITY_VERIFIER
+  VOLUNTEER
+  NGO
+  GOVT_AGENCY
+  DS_OFFICER
+  ADMIN
+}
+
+enum CaseStatus {
+  PENDING
+  UNDER_VERIFICATION
+  VERIFIED
+  ASSIGNED
+  IN_PROGRESS
+  RESOLVED
+  DISPUTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum Category {
+  ROADS
+  DRAINAGE
+  STREETLIGHTS
+  WATER
+  PUBLIC_BUILDINGS
+  SANITATION
+  OTHER
+}
+
+enum VerificationDecision {
+  CONFIRM
+  DISPUTE
+}
+
+enum PledgeType {
+  FUNDING
+  MATERIALS
+  VOLUNTEERS
+  TECHNICAL_SUPPORT
+}
+
+model User {
+  id                String       @id @default(cuid())
+  email             String       @unique
+  passwordHash      String       @default("")
+  name              String
+  avatarUrl         String?
+  role              Role         @default(CITIZEN)
+  preferredLanguage String       @default("en") // "en", "si", "ta"
+  trustScore        Float        @default(75.0)
+  phone             String?
+  status            String       @default("ACTIVE") // ACTIVE, SUSPENDED, PENDING_APPROVAL
+  organization      String?      // RDA, DS Office Colombo, Rotary, etc.
+  dsDivisionId      String?
+  dsDivision        DsDivision?  @relation(fields: [dsDivisionId], references: [id])
+  
+  reports           Report[]          @relation("ReporterRelation")
+  assignedReports   Report[]          @relation("AssignedAgencyRelation")
+  verifications     Verification[]
+  fieldTasks        FieldTask[]
+  fieldEvidences    FieldEvidence[]
+  ngoCommitments    NgoCommitment[]
+  comments          Comment[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+}
+
+model DsDivision {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  nameEn      String
+  nameSi      String
+  nameTa      String
+  district    String
+  province    String
+  latitude    Float
+  longitude   Float
+  users       User[]
+  reports     Report[]
+  createdAt   DateTime @default(now())
+}
+
+model Report {
+  id                    String        @id @default(cuid())
+  caseNumber            String        @unique // e.g. CP-2026-1042
+  title                 String
+  description           String
+  category              Category      @default(ROADS)
+  status                CaseStatus    @default(PENDING)
+  latitude              Float
+  longitude             Float
+  address               String
+  isAnonymous           Boolean       @default(false)
+  
+  // AI Triage fields
+  priorityScore         Float         @default(50.0) // 1 to 100
+  aiSummary             String?
+  aiCategoryConfidence  Float?
+  aiDuplicateClusterId  String?
+
+  reporterId            String
+  reporter              User          @relation("ReporterRelation", fields: [reporterId], references: [id])
+  
+  dsDivisionId          String
+  dsDivision            DsDivision    @relation(fields: [dsDivisionId], references: [id])
+
+  assignedAgencyId      String?
+  assignedAgency        User?         @relation("AssignedAgencyRelation", fields: [assignedAgencyId], references: [id])
+  
+  assignedInstructions  String?
+  
+  verificationCount     Int           @default(0)
+  disputeCount          Int           @default(0)
+  verificationThreshold Int           @default(3)
+
+  media                 ReportMedia[]
+  verifications         Verification[]
+  caseAssignments       CaseAssignment[]
+  fieldTasks            FieldTask[]
+  fieldEvidences        FieldEvidence[]
+  ngoCommitments        NgoCommitment[]
+  comments              Comment[]
+  notifications         Notification[]
+
+  resolutionNotes       String?
+  resolutionDate        DateTime?
+
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+}
+
+model ReportMedia {
+  id        String   @id @default(cuid())
+  reportId  String
+  report    Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  url       String
+  caption   String?
+  mediaType String   @default("PHOTO") // PHOTO, BEFORE, AFTER, VIDEO
+  createdAt DateTime @default(now())
+}
+
+model Verification {
+  id         String               @id @default(cuid())
+  reportId   String
+  report     Report               @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  verifierId String
+  verifier   User                 @relation(fields: [verifierId], references: [id])
+  decision   VerificationDecision
+  reason     String?
+  createdAt  DateTime             @default(now())
+}
+
+model CaseAssignment {
+  id           String   @id @default(cuid())
+  reportId     String
+  report       Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  agencyName   String
+  assignedBy   String
+  instructions String?
+  dueDate      DateTime?
+  status       String   @default("ACTIVE")
+  createdAt    DateTime @default(now())
+}
+
+model FieldTask {
+  id          String          @id @default(cuid())
+  reportId    String
+  report      Report          @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  volunteerId String
+  volunteer   User            @relation(fields: [volunteerId], references: [id])
+  taskType    String          @default("INSPECTION") // INSPECTION, VERIFICATION, COMMUNITY_WORK
+  status      String          @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED
+  dueDate     DateTime?
+  evidences   FieldEvidence[]
+  createdAt   DateTime        @default(now())
+}
+
+model FieldEvidence {
+  id                String    @id @default(cuid())
+  taskId            String?
+  task              FieldTask? @relation(fields: [taskId], references: [id])
+  reportId          String
+  report            Report    @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  volunteerId       String
+  volunteer         User      @relation(fields: [volunteerId], references: [id])
+  observedCondition String
+  notes             String?
+  photoUrls         String    @default("[]") // JSON array of photo URLs
+  signatureUrl      String?
+  latitude          Float
+  longitude         Float
+  createdAt         DateTime  @default(now())
+}
+
+model NgoCommitment {
+  id          String     @id @default(cuid())
+  reportId    String
+  report      Report     @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  ngoId       String
+  ngo         User       @relation(fields: [ngoId], references: [id])
+  pledgeType  PledgeType @default(FUNDING)
+  amountLkr   Float?
+  description String
+  status      String     @default("PLEDGED") // PLEDGED, FULFILLED, CANCELLED
+  createdAt   DateTime   @default(now())
+}
+
+model Comment {
+  id         String   @id @default(cuid())
+  reportId   String
+  report     Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  text       String
+  isInternal Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String   @default("INFO") // INFO, SUCCESS, WARNING, URGENT
+  reportId  String?
+  report    Report?  @relation(fields: [reportId], references: [id])
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  userRole   String
+  action     String   // REPORT_SUBMITTED, REPORT_VERIFIED, CASE_ASSIGNED, CASE_RESOLVED, ROLE_CHANGED, etc.
+  entityType String   // Report, User, Verification
+  entityId   String
+  details    String?  // JSON detail string
+  ipAddress  String   @default("127.0.0.1")
+  createdAt  DateTime @default(now())
+}
+
+model PlatformSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}
